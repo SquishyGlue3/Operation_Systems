@@ -1,0 +1,524 @@
+        -:    0:Source:mync.cpp
+        -:    0:Graph:mync.gcno
+        -:    0:Data:mync.gcda
+        -:    0:Runs:0
+        -:    1:#include <iostream>
+        -:    2:#include <sys/types.h>
+        -:    3:#include <sys/socket.h>
+        -:    4:#include <netinet/in.h>
+        -:    5:#include <arpa/inet.h>
+        -:    6:#include <unistd.h>
+        -:    7:#include <cstring>
+        -:    8:#include <vector>
+        -:    9:#include <string>
+        -:   10:#include <netdb.h>
+        -:   11:#include <errno.h>
+        -:   12:#include <sys/un.h>
+        -:   13:
+        -:   14:using namespace std;
+        -:   15:
+        -:   16:static struct sockaddr_in client_addr; // UDP client address we need those to send data to the client because we do not have direct connection to the client
+        -:   17:static struct sockaddr_in serv_addr;   // UDP server address we need those to send data to the server because we do not have direct connection to the server(if we send from server to server)
+        -:   18:
+        -:   19:// Function to start a TCP server and listen for input
+    #####:   20:int startTcpServer(int port)
+        -:   21:{
+        -:   22:    int server_fd, new_socket;
+        -:   23:    struct sockaddr_in address;
+    #####:   24:    int addrlen = sizeof(address);
+        -:   25:
+    #####:   26:    cout << "Creating socket..." << endl;
+    #####:   27:    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) // create socket
+        -:   28:    {
+    #####:   29:        perror("socket failed");
+    #####:   30:        exit(EXIT_FAILURE);
+        -:   31:    }
+    #####:   32:    address.sin_family = AF_INET;
+    #####:   33:    address.sin_addr.s_addr = INADDR_ANY;
+    #####:   34:    address.sin_port = htons(port);
+        -:   35:
+    #####:   36:    cout << "Binding socket to port " << port << "..." << endl;
+    #####:   37:    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) // bind socket to port
+        -:   38:    {
+    #####:   39:        perror("bind failed");
+    #####:   40:        exit(EXIT_FAILURE);
+        -:   41:    }
+    #####:   42:    cout << "Listening on port " << port << "..." << endl;
+    #####:   43:    if (listen(server_fd, 3) < 0) // listen for connections on socket
+        -:   44:    {
+    #####:   45:        perror("listen");
+    #####:   46:        exit(EXIT_FAILURE);
+        -:   47:    }
+    #####:   48:    cout << "Accepting connection..." << endl;
+    #####:   49:    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) // accept connection on socket
+        -:   50:    {
+    #####:   51:        perror("accept");
+    #####:   52:        exit(EXIT_FAILURE);
+        -:   53:    }
+    #####:   54:    cout << "Connection accepted." << endl;
+    #####:   55:    return new_socket;
+        -:   56:}
+        -:   57:
+        -:   58:// Function to start a TCP client and connect for output
+    #####:   59:int startTcpClient(const string &host, int port)
+        -:   60:{
+        -:   61:    struct sockaddr_in serv_addr;
+    #####:   62:    int sock = 0;
+        -:   63:    struct hostent *he;
+        -:   64:
+    #####:   65:    cout << "Creating socket..." << endl;
+    #####:   66:    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+        -:   67:    {
+    #####:   68:        perror("Socket creation error");
+    #####:   69:        exit(EXIT_FAILURE);
+        -:   70:    }
+        -:   71:
+    #####:   72:    cout << "Resolving hostname " << host << "..." << endl;
+    #####:   73:    if ((he = gethostbyname(host.c_str())) == NULL) // get host info from hostname and store in he
+        -:   74:    {
+    #####:   75:        herror("gethostbyname");
+    #####:   76:        exit(EXIT_FAILURE);
+        -:   77:    }
+        -:   78:
+    #####:   79:    serv_addr.sin_family = AF_INET;
+    #####:   80:    serv_addr.sin_port = htons(port);
+    #####:   81:    serv_addr.sin_addr = *((struct in_addr *)he->h_addr); // get ip address from host info and store in serv_addr
+        -:   82:
+    #####:   83:    cout << "Connecting to " << host << " on port " << port << "..." << endl;
+    #####:   84:    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) // connect to server using socket
+        -:   85:    {
+    #####:   86:        perror("Connection failed");
+    #####:   87:        exit(EXIT_FAILURE);
+        -:   88:    }
+    #####:   89:    cout << "Connected to " << host << " on port " << port << "." << endl;
+    #####:   90:    return sock;
+        -:   91:}
+        -:   92:
+    #####:   93:int startUdpServer(int port, int timeout)
+        -:   94:{
+        -:   95:    int server_fd;
+    #####:   96:    int addrlen = sizeof(serv_addr);
+        -:   97:
+    #####:   98:    cout << "Creating socket..." << endl;
+    #####:   99:    if ((server_fd = socket(AF_INET, SOCK_DGRAM, 0)) == 0) // create socket
+        -:  100:    {
+    #####:  101:        perror("socket failed");
+    #####:  102:        exit(EXIT_FAILURE);
+        -:  103:    }
+    #####:  104:    serv_addr.sin_family = AF_INET;
+    #####:  105:    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    #####:  106:    serv_addr.sin_port = htons(port);
+        -:  107:
+    #####:  108:    cout << "Binding socket to port " << port << "..." << endl;
+    #####:  109:    if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) // bind socket to port
+        -:  110:    {
+    #####:  111:        perror("bind failed");
+    #####:  112:        exit(EXIT_FAILURE);
+        -:  113:    }
+    #####:  114:    cout << "Listening on port " << port << "..." << endl;
+    #####:  115:    alarm(timeout);
+    #####:  116:    return server_fd;
+        -:  117:}
+        -:  118:
+    #####:  119:int startUdpClient(const string &host, int port)
+        -:  120:{
+    #####:  121:    int sock = 0;
+        -:  122:    struct hostent *he; // host entry structure to store host info
+        -:  123:
+    #####:  124:    cout << "Creating socket..." << endl;
+    #####:  125:    if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0) // create socket
+        -:  126:    {
+    #####:  127:        perror("Socket creation error");
+    #####:  128:        exit(EXIT_FAILURE);
+        -:  129:    }
+        -:  130:
+    #####:  131:    cout << "Resolving hostname " << host << "..." << endl;
+    #####:  132:    if ((he = gethostbyname(host.c_str())) == NULL) // get host info from hostname and store in he
+        -:  133:    {
+    #####:  134:        herror("gethostbyname");
+    #####:  135:        exit(EXIT_FAILURE);
+        -:  136:    }
+        -:  137:
+    #####:  138:    client_addr.sin_family = AF_INET;
+    #####:  139:    client_addr.sin_port = htons(port);
+    #####:  140:    client_addr.sin_addr = *((struct in_addr *)he->h_addr); // get ip address from host info and store in client_addr
+    #####:  141:    return sock;
+        -:  142:}
+        -:  143:
+        -:  144:// Function to execute the command and redirect its output
+    #####:  145:void executeCommand(const string &program, const vector<string> &args, int output_fd)
+        -:  146:{
+        -:  147:    int pipeOut[2];
+        -:  148:    pid_t pid;
+        -:  149:
+    #####:  150:    cout << "Creating pipes..." << endl;
+    #####:  151:    if (pipe(pipeOut) == -1)
+        -:  152:    {
+    #####:  153:        perror("pipeOut");
+    #####:  154:        exit(EXIT_FAILURE);
+        -:  155:    }
+        -:  156:
+    #####:  157:    cout << "Forking process..." << endl;
+    #####:  158:    pid = fork();
+    #####:  159:    if (pid == -1)
+        -:  160:    {
+    #####:  161:        perror("fork");
+    #####:  162:        exit(EXIT_FAILURE);
+        -:  163:    }
+        -:  164:
+    #####:  165:    if (pid == 0)
+        -:  166:    { // Child process
+    #####:  167:        cout << "In child process. Redirecting stdout..." << endl;
+    #####:  168:        close(pipeOut[0]);               // Close read end of pipeOut
+    #####:  169:        dup2(pipeOut[1], STDOUT_FILENO); // Redirect stdout to pipeOut write end
+        -:  170:
+        -:  171:        // Prepare arguments for execv
+    #####:  172:        vector<char *> exec_args;
+    #####:  173:        exec_args.push_back(strdup(program.c_str()));
+    #####:  174:        for (const auto &arg : args)
+        -:  175:        {
+    #####:  176:            exec_args.push_back(strdup(arg.c_str()));
+        -:  177:        }
+    #####:  178:        exec_args.push_back(NULL);
+        -:  179:
+    #####:  180:        cout << "Executing program: " << program << " with arguments: ";
+    #####:  181:        for (const auto &arg : exec_args)
+        -:  182:        {
+    #####:  183:            if (arg)
+    #####:  184:                cout << arg << " ";
+        -:  185:        }
+    #####:  186:        cout << endl;
+        -:  187:
+    #####:  188:        execv(exec_args[0], exec_args.data());
+    #####:  189:        perror("execv");
+    #####:  190:        exit(EXIT_FAILURE);
+    =====:  191:    }
+        -:  192:    else
+        -:  193:    {                      // Parent process
+    #####:  194:        close(pipeOut[1]); // Close write end of pipeOut
+        -:  195:
+        -:  196:        fd_set readfds;
+        -:  197:        char buffer[1024];
+        -:  198:
+    #####:  199:        cout << "In parent process. Entering select loop..." << endl;
+        -:  200:        while (true)
+        -:  201:        {
+    #####:  202:            int valread = read(pipeOut[0], buffer, sizeof(buffer)); // read from the pipeOut and store the data in buffer
+    #####:  203:            if (valread == 0)                                       // if the read value is 0, that means the server and the client are done sending data
+        -:  204:            {
+    #####:  205:                break; // EOF
+        -:  206:            }
+    #####:  207:            cout << "Read " << valread << " bytes from pipeOut. Writing to output_fd..." << endl;
+    #####:  208:            write(output_fd, buffer, valread); // write the data to the output_fd to send it to the client
+    #####:  209:        }
+        -:  210:
+    #####:  211:        close(pipeOut[0]);
+        -:  212:    }
+    #####:  213:}
+        -:  214:
+        -:  215:// start UDS server datagram on recieved path
+    #####:  216:int startDatagramServer(const string &path)
+        -:  217:{
+        -:  218:    int server_fd;
+        -:  219:    struct sockaddr_un serv_addr;
+    #####:  220:    unlink(path.c_str()); // unlink the path to avoid error if it is already exist
+    #####:  221:    cout << "Creating UDS datagram socket..." << endl;
+    #####:  222:    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1)
+        -:  223:    { // create socket AF_UNIX as the type of the socket, sock_DGRAM as the type of the data, 0 as the protocol
+    #####:  224:        perror("socket failed");
+    #####:  225:        exit(EXIT_FAILURE);
+        -:  226:    }
+    #####:  227:    cout << "Socket created." << endl;
+        -:  228:
+    #####:  229:    serv_addr.sun_family = AF_UNIX;                                            // set the family of the socket to AF_UNIX
+    #####:  230:    strncpy(serv_addr.sun_path, path.c_str(), sizeof(serv_addr.sun_path) - 1); // copy the path to the socket address using the recieved path
+        -:  231:
+    #####:  232:    cout << "Binding socket to path " << path << "..." << endl;
+        -:  233:
+    #####:  234:    if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1)
+        -:  235:    {
+    #####:  236:        perror("bind failed");
+    #####:  237:        exit(EXIT_FAILURE);
+        -:  238:    }
+        -:  239:
+    #####:  240:    return server_fd;
+        -:  241:}
+        -:  242:
+    #####:  243:int startDatagramClient(const string &path)
+        -:  244:{
+        -:  245:    int sock;
+        -:  246:    struct sockaddr_un client_addr;
+        -:  247:
+    #####:  248:    cout << "Creating UDS datagram socket..." << endl;
+    #####:  249:    if ((sock = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1)
+        -:  250:    {
+    #####:  251:        perror("socket failed");
+    #####:  252:        exit(EXIT_FAILURE);
+        -:  253:    }
+        -:  254:
+    #####:  255:    client_addr.sun_family = AF_UNIX;
+    #####:  256:    strncpy(client_addr.sun_path, path.c_str(), sizeof(client_addr.sun_path) - 1);
+        -:  257:
+    #####:  258:    return sock;
+        -:  259:}
+        -:  260:
+    #####:  261:int startStreamServer(const string &path)
+        -:  262:{
+        -:  263:    int server_fd;
+        -:  264:    struct sockaddr_un serv_addr;
+    #####:  265:    int addrlen = sizeof(serv_addr);
+        -:  266:
+    #####:  267:    cout << "Creating UDS stream socket..." << endl;
+    #####:  268:    if ((server_fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+        -:  269:    {
+    #####:  270:        perror("socket failed");
+    #####:  271:        exit(EXIT_FAILURE);
+        -:  272:    }
+        -:  273:
+    #####:  274:    serv_addr.sun_family = AF_UNIX;
+    #####:  275:    strncpy(serv_addr.sun_path, path.c_str(), sizeof(serv_addr.sun_path) - 1);
+        -:  276:
+    #####:  277:    cout << "Binding socket to path " << path << "..." << endl;
+    #####:  278:    unlink(serv_addr.sun_path);
+    #####:  279:    if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1)
+        -:  280:    {
+    #####:  281:        perror("bind failed");
+    #####:  282:        exit(EXIT_FAILURE);
+        -:  283:    }
+        -:  284:
+    #####:  285:    cout << "Listening on path " << path << "..." << endl;
+    #####:  286:    if (listen(server_fd, 3) == -1)
+        -:  287:    {
+    #####:  288:        perror("listen");
+    #####:  289:        exit(EXIT_FAILURE);
+        -:  290:    }
+        -:  291:
+        -:  292:    int new_socket;
+    #####:  293:    cout << "Accepting connection..." << endl;
+    #####:  294:    if ((new_socket = accept(server_fd, (struct sockaddr *)&serv_addr, (socklen_t *)&addrlen)) == -1)
+        -:  295:    {
+    #####:  296:        perror("accept");
+    #####:  297:        exit(EXIT_FAILURE);
+        -:  298:    }
+        -:  299:
+    #####:  300:    cout << "Connection accepted." << endl;
+    #####:  301:    return new_socket;
+        -:  302:}
+    #####:  303:int startStreamClient(const string &path)
+        -:  304:{
+        -:  305:    int sock;
+        -:  306:    struct sockaddr_un serv_addr;
+        -:  307:
+    #####:  308:    cout << "Creating UDS stream socket..." << endl;
+    #####:  309:    if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+        -:  310:    {
+    #####:  311:        perror("socket failed");
+    #####:  312:        exit(EXIT_FAILURE);
+        -:  313:    }
+        -:  314:
+    #####:  315:    serv_addr.sun_family = AF_UNIX;
+    #####:  316:    strncpy(serv_addr.sun_path, path.c_str(), sizeof(serv_addr.sun_path) - 1);
+        -:  317:
+    #####:  318:    cout << "Connecting to " << path << "..." << endl;
+    #####:  319:    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1)
+        -:  320:    {
+    #####:  321:        perror("connect failed");
+    #####:  322:        exit(EXIT_FAILURE);
+        -:  323:    }
+        -:  324:
+    #####:  325:    cout << "Connected to " << path << "." << endl;
+    #####:  326:    return sock;
+        -:  327:}
+        -:  328:
+    #####:  329:int main(int argc, char *argv[])
+        -:  330:{
+    #####:  331:    bool inputFlag = false;
+    #####:  332:    bool outputFlag = false;
+    #####:  333:    bool executeFlag = false;
+    #####:  334:    bool timeoutFlag = false;
+        -:  335:    int timeout;
+    #####:  336:    string inputMethod, outputMethod, command, programName, programAddition;
+    #####:  337:    vector<string> commandArgs; // Vector to store the arguments of the command to be executed
+        -:  338:
+        -:  339:
+    #####:  340:    cout << "Parsing arguments..." << endl;
+    #####:  341:    for (int i = 1; i < argc; ++i)
+        -:  342:    {
+    #####:  343:        string arg = argv[i];
+    #####:  344:        if (arg == "-e" && i + 1 < argc)
+        -:  345:        {
+    #####:  346:            executeFlag = true;
+    #####:  347:            command = argv[++i];
+    #####:  348:            size_t pos = command.find(' ');
+    #####:  349:            if (pos != string::npos)
+        -:  350:            { // If there is a space in the command, split it into program name and arguments
+    #####:  351:                programName = command.substr(0, pos);
+    #####:  352:                programAddition = command.substr(pos + 1);
+    #####:  353:                commandArgs.push_back(programAddition); // Add the arguments to the commandArgs vector
+        -:  354:            }
+        -:  355:            else
+        -:  356:            {
+    #####:  357:                programName = command; // If there is no space, the whole command is the program name
+        -:  358:            }
+        -:  359:        }
+    #####:  360:        else if (arg == "-t" && i + 1 < argc)
+        -:  361:        {
+    #####:  362:            timeoutFlag = true;
+    #####:  363:            timeout = stoi(argv[++i]);
+    #####:  364:            if (timeout < 0)
+        -:  365:            {
+    #####:  366:                cout << "Invalid timeout value. Exiting." << endl;
+    #####:  367:                exit(EXIT_FAILURE);
+        -:  368:            }
+        -:  369:        }
+    #####:  370:        else if (arg == "-i" && i + 1 < argc)
+        -:  371:        {
+    #####:  372:            inputFlag = true; // there is an input flag
+    #####:  373:            inputMethod = argv[++i];
+        -:  374:        }
+    #####:  375:        else if (arg == "-o" && i + 1 < argc)
+        -:  376:        {
+    #####:  377:            outputFlag = true; // there is an output flag
+    #####:  378:            outputMethod = argv[++i];
+        -:  379:        }
+    #####:  380:    }
+        -:  381:
+    #####:  382:    int input_fd = STDIN_FILENO;
+    #####:  383:    int output_fd = STDOUT_FILENO;
+        -:  384:
+        -:  385:    // Set up the input connection
+    #####:  386:    if (inputFlag)
+        -:  387:    { // if there is an input flag
+    #####:  388:        if (inputMethod.rfind("TCPS", 0) == 0)
+        -:  389:        { // if the input method is TCP server
+    #####:  390:            int port = stoi(inputMethod.substr(4));
+    #####:  391:            cout << "Starting TCP server on port " << port << endl;
+    #####:  392:            input_fd = startTcpServer(port);
+    #####:  393:            cout << "TCP server started and client connected." << endl;
+    #####:  394:            dup2(input_fd, STDIN_FILENO); // Redirect standard input to the server socket
+        -:  395:        }
+    #####:  396:        else if (inputMethod.rfind("TCPC", 0) == 0)
+        -:  397:        { // if the input method is TCP client
+    #####:  398:            string host = inputMethod.substr(4, inputMethod.find(',') - 4);
+    #####:  399:            int port = stoi(inputMethod.substr(inputMethod.find(',') + 1));
+    #####:  400:            cout << "Connecting to TCP server at " << host << " on port " << port << endl;
+    #####:  401:            input_fd = startTcpClient(host, port);
+    #####:  402:            cout << "Connected to TCP server." << endl;
+    #####:  403:            dup2(input_fd, STDIN_FILENO); // Redirect standard input to the client socket
+    #####:  404:        }
+    #####:  405:        else if (inputMethod.rfind("UDPS", 0) == 0)
+        -:  406:        { // if the input method is UDP server
+    #####:  407:            int port = stoi(inputMethod.substr(4));
+    #####:  408:            cout << "Starting UDP server on port " << port << endl;
+    #####:  409:            if (timeoutFlag)
+        -:  410:            { // receiving timeout value to kill the server after the timeout
+    #####:  411:                input_fd = startUdpServer(port, timeout);
+        -:  412:            }
+        -:  413:            else
+        -:  414:            {
+    #####:  415:                input_fd = startUdpServer(port, 0);
+        -:  416:            }
+    #####:  417:            cout << "UDP server started and client connected." << endl;
+    #####:  418:            dup2(input_fd, STDIN_FILENO); // Redirect standard input to the server socket
+        -:  419:        }
+    #####:  420:        else if (inputMethod.rfind("UDSSD", 0) == 0)
+        -:  421:        { // Unix domain sockets - server - datagram
+    #####:  422:            string path = inputMethod.substr(5);
+    #####:  423:            cout << "Starting UDS datagram server on path " << path << endl;
+    #####:  424:            input_fd = startDatagramServer(path);
+    #####:  425:            dup2(input_fd, STDIN_FILENO); // Redirect standard input to the server socket
+    #####:  426:        }
+    #####:  427:        else if (inputMethod.rfind("UDSSS", 0) == 0)
+        -:  428:        { // Unix domain sockets - server - stream
+    #####:  429:            string path = inputMethod.substr(5);
+    #####:  430:            cout << "Starting UDS stream server on path " << path << endl;
+    #####:  431:            input_fd = startStreamServer(path);
+    #####:  432:            dup2(input_fd, STDIN_FILENO); // Redirect standard input to the server socket
+    #####:  433:        }
+    #####:  434:        else if (inputMethod.rfind("UDSCS", 0) == 0)
+        -:  435:        { // Unix domain sockets - client - stream
+    #####:  436:            string path = inputMethod.substr(5);
+    #####:  437:            cout << "Connecting to UDS stream server at " << path << endl;
+    #####:  438:            input_fd = startStreamClient(path);
+    #####:  439:            dup2(input_fd, STDIN_FILENO); // Redirect standard input to the client socket
+    #####:  440:        }
+        -:  441:    }
+        -:  442:
+    #####:  443:    if (outputFlag)
+        -:  444:    {
+        -:  445:        // Set up the output connection
+    #####:  446:        if (outputMethod.rfind("TCPS", 0) == 0)
+        -:  447:        { // if the output method is TCP server
+    #####:  448:            int port = stoi(outputMethod.substr(4));
+    #####:  449:            cout << "Starting TCP server on port " << port << endl;
+    #####:  450:            output_fd = startTcpServer(port);
+    #####:  451:            cout << "TCP server started and client connected." << endl;
+    #####:  452:            dup2(output_fd, STDOUT_FILENO); // Redirect standard output to the server socket
+        -:  453:        }
+    #####:  454:        else if (outputMethod.rfind("TCPC", 0) == 0)
+        -:  455:        { // if the output method is TCP client
+    #####:  456:            string host = outputMethod.substr(4, outputMethod.find(',') - 4);
+    #####:  457:            int port = stoi(outputMethod.substr(outputMethod.find(',') + 1));
+    #####:  458:            cout << "Connecting to TCP server at " << host << " on port " << port << endl;
+    #####:  459:            output_fd = startTcpClient(host, port);
+    #####:  460:            cout << "Connected to TCP server." << endl;
+    #####:  461:            dup2(output_fd, STDOUT_FILENO); // Redirect standard output to the client socket
+    #####:  462:        }
+    #####:  463:        else if (outputMethod.rfind("UDPC", 0) == 0)
+        -:  464:        {                                                                     // if the output method is UDP client
+    #####:  465:            string host = outputMethod.substr(4, outputMethod.find(',') - 4); // get host name from the output method by taking the substring from 4 to the first comma minus 4
+    #####:  466:            int port = stoi(outputMethod.substr(outputMethod.find(',') + 1)); // get port number from the output method by taking the substring from the first comma plus 1 to the end of the string
+    #####:  467:            cout << "Connecting to UDP server at " << host << " on port " << port << endl;
+    #####:  468:            output_fd = startUdpClient(host, port);
+    #####:  469:            cout << "Connected to UDP server." << endl;
+    #####:  470:            dup2(output_fd, STDOUT_FILENO); // Redirect standard output to the client socket
+    #####:  471:        }
+    #####:  472:        else if (outputMethod.rfind("UDSSS", 0) == 0)
+        -:  473:        { // Unix domain sockets - server - stream
+    #####:  474:            string path = outputMethod.substr(5);
+    #####:  475:            cout << "Starting UDS stream server on path " << path << endl;
+    #####:  476:            output_fd = startStreamServer(path);
+    #####:  477:            dup2(output_fd, STDOUT_FILENO); // Redirect standard output to the server socket
+    #####:  478:        }
+    #####:  479:        else if (outputMethod.rfind("UDSCD", 0) == 0)
+        -:  480:        { // Unix domain sockets - cleint - datagram
+    #####:  481:            string path = outputMethod.substr(5);
+    #####:  482:            cout << "Connecting to UDS datagram server at " << path << endl;
+    #####:  483:            output_fd = startDatagramClient(path);
+    #####:  484:            dup2(output_fd, STDOUT_FILENO); // Redirect standard output to the client socket
+    #####:  485:        }
+    #####:  486:        else if (outputMethod.rfind("UDSCS", 0) == 0)
+        -:  487:        { // Unix domain sockets - client - stream
+    #####:  488:            string path = outputMethod.substr(5);
+    #####:  489:            cout << "Connecting to UDS stream server at " << path << endl;
+    #####:  490:            output_fd = startStreamClient(path);
+    #####:  491:            dup2(output_fd, STDOUT_FILENO); // Redirect standard output to the client socket
+    #####:  492:        }
+        -:  493:    }
+        -:  494:
+    #####:  495:    if (executeFlag)
+        -:  496:    {
+    #####:  497:        executeCommand(programName, commandArgs, output_fd); // using different function(in our case, ttt program) to execute the command and redirect its output
+        -:  498:    }
+    #####:  499:    else if (inputFlag || outputFlag)
+        -:  500:    {
+        -:  501:        // Transfer data from input_fd to output_fd without executing a program
+        -:  502:        char buffer[1024];
+        -:  503:        while (true)
+        -:  504:        {
+    #####:  505:            ssize_t bytes_read = read(input_fd, buffer, sizeof(buffer));
+    #####:  506:            if (bytes_read <= 0)
+        -:  507:            {
+    #####:  508:                break;
+        -:  509:            }
+    #####:  510:            write(output_fd, buffer, bytes_read);
+    #####:  511:        }
+    #####:  512:    }
+        -:  513:    else
+        -:  514:    {
+    #####:  515:        cout << "Invalid or insufficient parameters provided. Exiting." << endl;
+    #####:  516:        exit(EXIT_FAILURE);
+        -:  517:    }
+        -:  518:
+    #####:  519:    return 0;
+    #####:  520:}
